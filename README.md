@@ -41,3 +41,7 @@ On first run, grant **Accessibility** (for the keyboard shortcut and focusing wi
 ## Credits
 
 The window-focusing technique follows the approach used by [AltTab](https://github.com/lwouis/alt-tab-macos) and [yabai](https://github.com/koekeishiya/yabai).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
