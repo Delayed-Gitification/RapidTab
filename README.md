@@ -8,6 +8,8 @@ I love macOS, but I miss Alt+Tab from Windows. I tried all the available Alt+Tab
 
 Lightweight by design. No features — just fast switching.
 
+> **Update:** oh lol, the new AltTab updates have made it really quick. Never mind.
+
 ## How it's fast
 
 Most window switchers do their slow work (enumerating windows, screenshotting every one of them, drawing an animated UI) *before* they switch, so pressing the shortcut can take a second or more. RapidTab inverts that:
