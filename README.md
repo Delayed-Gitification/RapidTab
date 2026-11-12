@@ -4,7 +4,7 @@ A minimal, very fast Option+Tab window switcher for macOS.
 
 ## Why
 
-I love macOS, but I miss Alt+Tab from Windows. I tried all the available Alt+Tab clones, and while they had lots of fancy features, I found them slow and unreliable. So I used Claude Opus 5.5 to make my own, in about six prompts, and it feels roughly 100x faster.
+I love macOS, but I miss Alt+Tab from Windows. I tried all the available Alt+Tab clones, and while they had lots of fancy features, I found them slow and unreliable. So I used Claude Opus 5.5 to make my own, and it feels roughly 100x faster.
 
 Lightweight by design. No features — just fast switching.
 
