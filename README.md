@@ -26,6 +26,7 @@ Most window switchers do their slow work (enumerating windows, screenshotting ev
 | Release Option, Return or Space | Switch to selected window |
 | Esc | Cancel |
 | Click a tile | Switch to it |
+| Click the red × (hover a tile) | Close that window, keep switching |
 
 Windows are shown 16 per page in an even grid; moving past the last tile flips to the next page.
 

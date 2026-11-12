@@ -91,18 +91,35 @@ func focusWindow(_ w: WinInfo) {
     // Raise the specific window via Accessibility, off the main thread (can block on slow apps).
     let pid = w.pid, wid = w.wid
     axQueue.async {
-        let app = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(app, 0.5)
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value) == .success,
-              let wins = value as? [AXUIElement], let getWin = Priv.axGetWindow else { return }
-        for axw in wins {
-            var id: CGWindowID = 0
-            if getWin(axw, &id) == .success, id == wid {
-                AXUIElementPerformAction(axw, kAXRaiseAction as CFString)
-                AXUIElementSetAttributeValue(axw, kAXMainAttribute as CFString, kCFBooleanTrue)
-                break
-            }
+        guard let axw = axWindow(pid: pid, wid: wid) else { return }
+        AXUIElementPerformAction(axw, kAXRaiseAction as CFString)
+        AXUIElementSetAttributeValue(axw, kAXMainAttribute as CFString, kCFBooleanTrue)
+    }
+}
+
+/// Finds the Accessibility element for a window. Call off the main thread.
+func axWindow(pid: pid_t, wid: CGWindowID) -> AXUIElement? {
+    let app = AXUIElementCreateApplication(pid)
+    AXUIElementSetMessagingTimeout(app, 0.5)
+    var value: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value) == .success,
+          let wins = value as? [AXUIElement], let getWin = Priv.axGetWindow else { return nil }
+    for axw in wins {
+        var id: CGWindowID = 0
+        if getWin(axw, &id) == .success, id == wid { return axw }
+    }
+    return nil
+}
+
+/// Closes a window by pressing its own close button, exactly as if you'd clicked the red dot.
+func closeWindow(_ w: WinInfo) {
+    let pid = w.pid, wid = w.wid
+    axQueue.async {
+        guard let axw = axWindow(pid: pid, wid: wid) else { return }
+        var btn: CFTypeRef?
+        if AXUIElementCopyAttributeValue(axw, kAXCloseButtonAttribute as CFString, &btn) == .success,
+           let b = btn, CFGetTypeID(b) == AXUIElementGetTypeID() {
+            AXUIElementPerformAction(b as! AXUIElement, kAXPressAction as CFString)
         }
     }
 }
@@ -289,6 +306,7 @@ final class SwitcherView: NSView {
             (label as NSString).draw(with: NSRect(x: r.minX + 34, y: r.maxY - 26, width: r.width - 42, height: 18),
                                      options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
                                      attributes: attrs)
+            if i == hovered { drawCloseButton(closeRect(i), pressedLook: hoveringClose) }
         }
         if let pi = pageInfo {
             // Page dots along the bottom.
@@ -304,9 +322,73 @@ final class SwitcherView: NSView {
         }
     }
 
+    // MARK: Hover + close button (macOS traffic-light style, top-left of the hovered tile)
+
+    var onClose: ((Int) -> Void)?
+    var hovered: Int?
+    private var hoveringClose = false
+
+    func closeRect(_ i: Int) -> NSRect {
+        let r = tileRect(i)
+        return NSRect(x: r.minX + 2, y: r.minY + 2, width: 18, height: 18)
+    }
+
+    private func drawCloseButton(_ rect: NSRect, pressedLook: Bool) {
+        let red = NSColor(srgbRed: 1.0, green: 0.37, blue: 0.34, alpha: 1)
+        (pressedLook ? red.blended(withFraction: 0.15, of: .black) ?? red : red).setFill()
+        let circle = NSBezierPath(ovalIn: rect)
+        circle.fill()
+        NSColor.black.withAlphaComponent(0.25).setStroke()
+        circle.lineWidth = 0.5
+        circle.stroke()
+        // The × glyph.
+        let inset = rect.insetBy(dx: 5.5, dy: 5.5)
+        let x = NSBezierPath()
+        x.move(to: NSPoint(x: inset.minX, y: inset.minY)); x.line(to: NSPoint(x: inset.maxX, y: inset.maxY))
+        x.move(to: NSPoint(x: inset.maxX, y: inset.minY)); x.line(to: NSPoint(x: inset.minX, y: inset.maxY))
+        x.lineWidth = 1.6
+        x.lineCapStyle = .round
+        NSColor.black.withAlphaComponent(0.6).setStroke()
+        x.stroke()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero,
+                                       options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+    }
+
+    private func updateHover(_ p: NSPoint?) {
+        let h = p.flatMap { p in items.indices.first(where: { tileRect($0).contains(p) }) }
+        let hc = h.map { closeRect($0).insetBy(dx: -3, dy: -3).contains(p!) } ?? false
+        if h != hovered || hc != hoveringClose {
+            hovered = h; hoveringClose = hc
+            needsDisplay = true
+        }
+    }
+
+    /// Re-evaluates hover from the current mouse position (after the panel moves or the page changes).
+    func hoverAtMouse() {
+        hovered = nil; hoveringClose = false
+        guard let w = window else { return }
+        let p = convert(w.convertPoint(fromScreen: NSEvent.mouseLocation), from: nil)
+        updateHover(bounds.contains(p) ? p : nil)
+    }
+
+    override func mouseMoved(with event: NSEvent) { updateHover(convert(event.locationInWindow, from: nil)) }
+    override func mouseEntered(with event: NSEvent) { updateHover(convert(event.locationInWindow, from: nil)) }
+    override func mouseExited(with event: NSEvent) { updateHover(nil) }
+
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
-        if let i = items.indices.first(where: { tileRect($0).contains(p) }) { onClick?(i) }
+        guard let i = items.indices.first(where: { tileRect($0).contains(p) }) else { return }
+        if closeRect(i).insetBy(dx: -3, dy: -3).contains(p) {
+            onClose?(i)
+        } else {
+            onClick?(i)
+        }
     }
 }
 
@@ -332,6 +414,7 @@ final class SwitcherPanel: NSPanel {
         fx.layer?.masksToBounds = true
         fx.addSubview(view)
         contentView = fx
+        acceptsMouseMovedEvents = true
     }
 
     override var canBecomeKey: Bool { false }
@@ -364,12 +447,15 @@ final class SwitcherPanel: NSPanel {
         setFrame(frame, display: false)
         fx.frame = NSRect(origin: .zero, size: size)
         view.frame = fx.bounds
+        view.hoverAtMouse()
         view.needsDisplay = true
         orderFrontRegardless()
     }
 
     func select(_ i: Int) {
+        let oldPage = page
         updatePage(selected: i)
+        if page != oldPage { view.hoverAtMouse() }
         view.needsDisplay = true
     }
 }
@@ -395,6 +481,19 @@ final class Switcher {
             guard let self, self.active else { return }
             self.selected = self.panel.offset + i
             self.commit()
+        }
+        panel.view.onClose = { [weak self] i in
+            // Close the window but keep the switcher open, so you can keep tidying up.
+            guard let self, self.active else { return }
+            let idx = self.panel.offset + i
+            guard idx < self.windows.count else { return }
+            let w = self.windows.remove(at: idx)
+            closeWindow(w)
+            ThumbCache.shared.images[w.wid] = nil
+            if self.windows.isEmpty { self.cancel(); return }
+            if idx < self.selected { self.selected -= 1 }
+            self.selected = min(self.selected, self.windows.count - 1)
+            self.panel.show(self.windows, selected: self.selected)
         }
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
